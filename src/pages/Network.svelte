@@ -10,7 +10,6 @@
   
   let discoveryRunning = false
   let newPeerAddress = ''
-  // let sortByReputation = false
   let sortOrder: 'none' | 'asc' | 'desc' = 'none'
 
 
