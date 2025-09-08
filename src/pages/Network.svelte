@@ -10,7 +10,10 @@
   
   let discoveryRunning = false
   let newPeerAddress = ''
-  
+  // let sortByReputation = false
+  let sortOrder: 'none' | 'asc' | 'desc' = 'none'
+
+
   function formatSize(bytes: number): string {
     const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
     let size = bytes
@@ -184,10 +187,29 @@
   
   <!-- Connected Peers -->
   <Card class="p-6">
-    <h2 class="text-lg font-semibold mb-4">Connected Peers ({$peers.length})</h2>
-    <div class="space-y-3">
-      {#each $peers as peer}
-        <div class="p-4 bg-secondary rounded-lg">
+      <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold">Connected Peers ({$peers.length})</h2>
+          <div class="flex items-center gap-2">
+              <Label for="sort">Sort By</Label>
+              <select
+                      id="sort"
+                      bind:value={sortOrder}
+                      class="border rounded px-2 py-1 text-sm"
+              >
+                  <option value="none">None</option>
+                  <option value="asc">Stars ↑ (Ascending)</option>
+                  <option value="desc">Stars ↓ (Descending)</option>
+              </select>
+          </div>
+      </div>
+
+      <div class="space-y-3">
+          {#each [...$peers].sort((a, b) => {
+              if (sortOrder === 'asc') return a.reputation - b.reputation
+              if (sortOrder === 'desc') return b.reputation - a.reputation
+              return 0
+          }) as peer}
+          <div class="p-4 bg-secondary rounded-lg">
           <div class="flex items-center justify-between mb-2">
             <div class="flex items-center gap-3">
               <div class="w-2 h-2 rounded-full {
