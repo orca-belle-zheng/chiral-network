@@ -37,6 +37,7 @@ export interface FileItem {
   manifest?: any;
   path?: string;
   cids?: string[];
+  price?: number;
 }
 
 export interface ProxyNode {
