@@ -1671,6 +1671,8 @@ async fn run_dht_node(
                         metadata.seeders = heartbeats_to_peer_list(&active_heartbeats);
 
                         // Store minimal metadata in DHT
+                        println!("💾 DHT: About to serialize metadata with price: {:?}, uploader: {:?}", metadata.price, metadata.uploader_address);
+
                         let dht_metadata = serde_json::json!({
                             "file_hash":metadata.merkle_root,
                             "merkle_root": metadata.merkle_root,
@@ -1687,7 +1689,11 @@ async fn run_dht_node(
                             "encrypted_key_bundle": metadata.encrypted_key_bundle,
                             "seeders": metadata.seeders,
                             "seederHeartbeats": active_heartbeats,
+                            "price": metadata.price,
+                            "uploader_address": metadata.uploader_address,
                         });
+
+                        println!("💾 DHT: Serialized metadata JSON: {}", serde_json::to_string(&dht_metadata).unwrap_or_else(|_| "error".to_string()));
 
                         {
                             let mut cache = seeder_heartbeats_cache.lock().await;
@@ -3555,6 +3561,8 @@ async fn handle_kademlia_event(
                                     ..Default::default()
                                 };
 
+                                println!("🔎 DHT: Retrieved metadata from DHT - price: {:?}, uploader: {:?}", metadata.price, metadata.uploader_address);
+
                                 let notify_metadata = metadata.clone();
                                 let file_hash = notify_metadata.merkle_root.clone();
                                 info!(
@@ -5075,6 +5083,8 @@ impl DhtService {
         is_encrypted: bool,
         encryption_method: Option<String>,
         key_fingerprint: Option<String>,
+        price: Option<f64>,
+        uploader_address: Option<String>,
     ) -> Result<FileMetadata, String> {
         let latest = self
             .get_latest_version_by_file_name(file_name.clone())
@@ -5105,8 +5115,8 @@ impl DhtService {
             cids: None,
             is_root,
             download_path: None,
-            price: None,
-            uploader_address: None,
+            price,
+            uploader_address,
         })
     }
 

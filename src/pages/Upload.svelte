@@ -3,7 +3,7 @@
     import Card from '$lib/components/ui/card.svelte'
     import Badge from '$lib/components/ui/badge.svelte'
     import { File as FileIcon, X, Plus, FolderOpen, FileText, Image, Music, Video, Archive, Code, FileSpreadsheet, Upload, Download, RefreshCw, Lock, Key, Blocks, Globe } from 'lucide-svelte'
-    import { files, type FileItem, etcAccount } from '$lib/stores'
+    import { files, type FileItem, etcAccount, settings } from '$lib/stores'
     import { loadSeedList, saveSeedList, type SeedRecord } from '$lib/services/seedPersistence'
     import { t } from 'svelte-i18n';
     import { get } from 'svelte/store'
@@ -85,13 +85,12 @@
     let recipientPublicKey = ''
     let showEncryptionOptions = false
 
-    // Pricing modal state
-    let showPricingModal = false
-    let currentFileName = ''
-    let currentFilePrice = ''
-    let currentFileHash = ''
-    let isEditingPrice = false
-    let pricingResolve: ((value: number | null) => void) | null = null
+    // Calculate price based on file size and price per MB
+    function calculateFilePrice(sizeInBytes: number): number {
+        const sizeInMB = sizeInBytes / 1_048_576; // Convert bytes to MB
+        const pricePerMb = $settings.pricePerMb || 0.001;
+        return parseFloat((sizeInMB * pricePerMb).toFixed(6)); // Round to 6 decimal places
+    }
 
     $: storageLabel = isRefreshingStorage
         ? tr('upload.storage.checking')
@@ -175,58 +174,6 @@
             isRefreshingStorage = false
         }
     }
-    async function getPrice(fileName: string): Promise<number | null> {
-        return new Promise((resolve) => {
-            currentFileName = fileName;
-            currentFilePrice = '';
-            isEditingPrice = false;
-            showPricingModal = true;
-            pricingResolve = resolve;
-        });
-    }
-
-    function handlePricingSubmit() {
-        const parsedPrice = parseFloat(currentFilePrice);
-        if (isNaN(parsedPrice) || parsedPrice < 0) {
-            showToast('Invalid price entered. Please enter a valid number.', 'error');
-            return;
-        }
-
-        if (isEditingPrice && currentFileHash) {
-            // Update the price in the files store
-            files.update(filesList => {
-                return filesList.map(f => {
-                    if (f.hash === currentFileHash) {
-                        return { ...f, price: parsedPrice };
-                    }
-                    return f;
-                });
-            });
-            showToast('Price updated successfully!', 'success');
-        }
-
-        showPricingModal = false;
-        if (pricingResolve) {
-            pricingResolve(parsedPrice);
-            pricingResolve = null;
-        }
-    }
-
-    function handlePricingCancel() {
-        showPricingModal = false;
-        if (pricingResolve) {
-            pricingResolve(null);
-            pricingResolve = null;
-        }
-    }
-
-    function openEditPriceModal(file: FileItem) {
-        currentFileName = file.name;
-        currentFilePrice = file.price?.toString() || '';
-        currentFileHash = file.hash;
-        isEditingPrice = true;
-        showPricingModal = true;
-    }
 
 
     onMount(async () => {
@@ -254,6 +201,7 @@
                             version: 1,
                             isEncrypted: false,
                             manifest: s.manifest ?? null,
+                            price: s.price ?? 0,
                         })
                     }
                 }
@@ -372,15 +320,23 @@
                                     fileData,
                                 });
 
+                                // Calculate price based on file size
+                                const filePrice = calculateFilePrice(file.size);
+
+                                console.log("🔍 Uploading file with calculated price:", filePrice, "for", file.size, "bytes");
+
                                 // Single command: chunk, encrypt, publish to DHT
                                 const result = await invoke<{merkleRoot: string, fileName: string, fileSize: number, isEncrypted: boolean, peerId: string, version: number}>(
                                     "upload_and_publish_file",
                                     {
                                         filePath: tempFilePath,
                                         fileName: file.name,  // Pass original filename for DHT
-                                        recipientPublicKey: recipientKey
+                                        recipientPublicKey: recipientKey,
+                                        price: filePrice
                                     }
                                 );
+
+                                console.log("📦 Received metadata from backend:", result);
 
                                 // Check for duplicates
                                 if (get(files).some(f => f.hash === result.merkleRoot)) {
@@ -404,7 +360,7 @@
                                     version: result.version,  // Use version from backend
                                     isNewVersion: isNewVersion,
                                     isEncrypted: result.isEncrypted,
-                                    price: price,
+                                    price: filePrice,
                                 };
 
                                 files.update((currentFiles) => [...currentFiles, newFile]);
@@ -484,7 +440,7 @@
         // Collect seeding entries
         const seeds: SeedRecord[] = $files
             .filter(f => f.status === 'seeding' && f.path)
-            .map(f => ({ id: f.id, path: f.path!, hash: f.hash, name: f.name, size: f.size, addedAt: (f.uploadDate ? f.uploadDate.toISOString() : new Date().toISOString()), manifest: f.manifest }))
+            .map(f => ({ id: f.id, path: f.path!, hash: f.hash, name: f.name, size: f.size, addedAt: (f.uploadDate ? f.uploadDate.toISOString() : new Date().toISOString()), manifest: f.manifest, price: f.price ?? 0 }))
 
         if (persistTimeout) clearTimeout(persistTimeout)
         persistTimeout = setTimeout(() => {
@@ -560,12 +516,9 @@
                     // Get just the filename from the path
                     const fileName = filePath.split(/[\/\\]/).pop() || '';
 
-                    // Get price for file
-                    const price = await getPrice(fileName);
-                    if(price === null){
-                        showToast('Price selection cancelled for ' + fileName, 'info');
-                        continue;
-                    }
+                    // Get file size to calculate price
+                    const fileSize = await invoke<number>('get_file_size', { filePath });
+                    const price = calculateFilePrice(fileSize);
 
                     // Check for existing versions before upload
                     let existingVersions: any[] = [];
@@ -575,7 +528,9 @@
                         console.log('No existing versions found for', fileName);
                     }
                     // Use versioned upload - let backend handle duplicate detection
+                    console.log("🔍 Uploading file with calculated price:", price, "for", fileSize, "bytes");
                     const metadata = await dhtService.publishFileToNetwork(filePath, price);
+                    console.log("📦 Received metadata from backend:", metadata);
 
                     const newFile = {
                         id: `file-${Date.now()}-${Math.random()}`,
@@ -610,12 +565,11 @@
                     const fileName = filePath.split(/[\/\\]/).pop() || '';
                     const recipientKey = useEncryptedSharing && recipientPublicKey.trim() ? recipientPublicKey.trim() : undefined;
 
-                    // Get price for file
-                    const price = await getPrice(fileName);
-                    if(price === null){
-                        showToast('Price selection cancelled for ' + fileName, 'info');
-                        return {type: 'skipped', fileName};
-                    }
+                    // Get file size to calculate price
+                    const fileSize = await invoke<number>('get_file_size', { filePath });
+                    const price = calculateFilePrice(fileSize);
+
+                    console.log("🔍 Uploading file with calculated price:", price, "for", fileSize, "bytes");
 
                     // UNIFIED UPLOAD: Single command chunks, encrypts, and publishes to DHT
                     const result = await invoke<{merkleRoot: string, fileName: string, fileSize: number, isEncrypted: boolean, peerId: string, version: number}>(
@@ -623,9 +577,12 @@
                         {
                             filePath,
                             fileName: null,  // File path already contains correct name
-                            recipientPublicKey: recipientKey
+                            recipientPublicKey: recipientKey,
+                            price: price
                         }
                     );
+
+                    console.log("📦 Received metadata from backend:", result);
 
                     // Check for duplicates
                     if (get(files).some((f: FileItem) => f.hash === result.merkleRoot)) {
@@ -1081,16 +1038,13 @@
                                             </div>
 
                                             <div class="flex items-center gap-2">
-                                                <!-- Price Badge with Dollar Sign Icon -->
+                                                <!-- Price Badge with Dollar Sign Icon (Auto-calculated) -->
                                                 {#if file.price !== undefined && file.price !== null}
-                                                    <button
-                                                            on:click={() => openEditPriceModal(file)}
-                                                            class="group/price flex items-center gap-1.5 bg-green-500/10 text-green-600 border-green-500/20 font-medium px-2.5 py-1 rounded-md hover:bg-green-500/15 hover:border-green-500/40 transition-all duration-200"
-                                                            title="Click to update price"
-                                                    >
-                                                        <DollarSign class="h-3.5 w-3.5 group-hover/price:animate-pulse" />
-                                                        <span class="text-sm">{file.price} Chiral</span>
-                                                    </button>
+                                                    <div class="flex items-center gap-1.5 bg-green-500/10 text-green-600 border border-green-500/20 font-medium px-2.5 py-1 rounded-md"
+                                                         title="Price calculated at {$settings.pricePerMb} Chiral per MB">
+                                                        <DollarSign class="h-3.5 w-3.5" />
+                                                        <span class="text-sm">{file.price.toFixed(6)} Chiral</span>
+                                                    </div>
                                                 {/if}
                                             </div>
 
@@ -1155,100 +1109,3 @@
     </Card>
 </div>
 
-<!-- Pricing Modal -->
-{#if showPricingModal}
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-        <div class="relative bg-gradient-to-br from-card via-card to-card/95 rounded-2xl shadow-2xl border border-border/50 w-full max-w-md animate-in zoom-in-95 duration-200">
-            <!-- Decorative gradient background -->
-            <div class="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-secondary/5 rounded-2xl"></div>
-
-            <!-- Modal content -->
-            <div class="relative p-6 space-y-6">
-                <!-- Header -->
-                <div class="space-y-2">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-3">
-                            <div class="flex items-center justify-center w-12 h-12 bg-gradient-to-br from-emerald-500/20 to-green-500/20 rounded-xl border border-emerald-500/30">
-                                <DollarSign class="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
-                            </div>
-                            <div>
-                                <h3 class="text-xl font-bold text-foreground">
-                                    {isEditingPrice ? 'Update Price' : 'Set File Price'}
-                                </h3>
-                                <p class="text-sm text-muted-foreground">
-                                    {isEditingPrice ? 'Change the price for this file' : 'Enter a price in Chiral tokens'}
-                                </p>
-                            </div>
-                        </div>
-                        <button
-                                on:click={handlePricingCancel}
-                                class="p-2 hover:bg-muted rounded-lg transition-colors"
-                                aria-label="Close modal"
-                        >
-                            <X class="h-5 w-5 text-muted-foreground" />
-                        </button>
-                    </div>
-                </div>
-
-                <!-- File name display -->
-                <div class="bg-muted/50 rounded-lg p-3 border border-border/50">
-                    <div class="flex items-center gap-2">
-                        <svelte:component this={getFileIcon(currentFileName)} class="h-5 w-5 {getFileColor(currentFileName)}" />
-                        <span class="text-sm font-medium text-foreground truncate">{currentFileName}</span>
-                    </div>
-                </div>
-
-                <!-- Price input -->
-                <div class="space-y-3">
-                    <Label for="price-input" class="text-sm font-semibold text-foreground">
-                        Price (Chiral Tokens)
-                    </Label>
-                    <div class="relative">
-                        <div class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                            <DollarSign class="h-5 w-5" />
-                        </div>
-                        <input
-                                id="price-input"
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                bind:value={currentFilePrice}
-                                placeholder="0.00"
-                                class="pl-10 text-lg font-semibold h-12 border-2 focus:border-emerald-500 transition-colors flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                                on:keydown={(e) => {
-                if (e.key === 'Enter') {
-                  handlePricingSubmit();
-                } else if (e.key === 'Escape') {
-                  handlePricingCancel();
-                }
-              }}
-                        />
-                    </div>
-                    <p class="text-xs text-muted-foreground">
-                        Enter the price you want to charge for this file in Chiral tokens
-                    </p>
-                </div>
-
-                <!-- Action buttons -->
-                <div class="flex gap-3 pt-2">
-                    <button
-                            on:click={handlePricingCancel}
-                            class="flex-1 px-4 py-2.5 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 rounded-lg transition-all duration-200 hover:scale-[1.02]"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                            on:click={handlePricingSubmit}
-                            class="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-                            disabled={!currentFilePrice || parseFloat(currentFilePrice) < 0}
-                    >
-                        <div class="flex items-center justify-center gap-2">
-                            <DollarSign class="h-4 w-4" />
-                            <span>{isEditingPrice ? 'Update Price' : 'Set Price'}</span>
-                        </div>
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-{/if}

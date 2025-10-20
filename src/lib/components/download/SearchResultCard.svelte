@@ -23,6 +23,9 @@
     let seederCopiedIndex: number | null = null;
     let showSeedingNotice = false;
     let showDecryptDialog = false;
+    let showDownloadConfirmDialog = false;
+    let showPaymentConfirmDialog = false;
+    let userBalance = 0;
 
     function formatFileSize(bytes: number): string {
         return toHumanReadableSize(bytes);
@@ -57,47 +60,76 @@
     }
 
     async function handleDownload() {
-        if (isSeeding) {
-            showDecryptDialog = true;
-        } else {
-            // Process payment if price is set
-            if (metadata.price && metadata.price > 0) {
-                if (!canAfford) {
-                    showToast(`Insufficient balance. You need ${metadata.price} Chiral to download this file.`, 'error');
-                    return;
-                }
+        // Always show initial download confirmation dialog first
+        showDownloadConfirmDialog = true;
+    }
 
-                if (!metadata.uploaderAddress) {
-                    showToast('Cannot process payment: uploader address not found', 'error');
-                    return;
-                }
+    function confirmDownload() {
+        showDownloadConfirmDialog = false;
 
-                try {
-                    showToast('Processing payment...', 'info');
-                    const txHash = await invoke('process_download_payment', {
-                        uploaderAddress: metadata.uploaderAddress,
-                        price: metadata.price
-                    });
-                    showToast(`Payment successful! Transaction: ${txHash.substring(0, 10)}...`, 'success');
-                } catch (error: any) {
-                    showToast(`Payment failed: ${error}`, 'error');
-                    return;
-                }
-            }
-
-            // Proceed with download after payment (or if free)
-            dispatch("download", metadata);
-            if (isBitswap) {
-                console.log("🔍 DEBUG: Initiating Bitswap download for file:", metadata.fileName);
-                await dhtService.downloadFile(metadata);
-                showToast(
-                    `The file "${metadata.fileName}" has been added to your download folder via Bitswap.`,
-                );
-            }
-            else {
-                console.log("🔍 DEBUG: Initiating WebRTC download for file:", metadata.fileName);
-            }
+        // If already seeding and paid, show payment confirmation
+        if (isSeeding && metadata.price && metadata.price > 0) {
+            showPaymentConfirmDialog = true;
         }
+        // If already seeding and free, proceed directly with download/decrypt
+        else if (isSeeding) {
+            confirmDecryptAndQueue();
+        }
+        // Show payment confirmation if file has a price (not seeding case)
+        else if (metadata.price && metadata.price > 0) {
+            showPaymentConfirmDialog = true;
+        } else {
+            // Free file - download directly
+            proceedWithDownload();
+        }
+    }
+
+    function cancelDownload() {
+        showDownloadConfirmDialog = false;
+    }
+
+    async function proceedWithDownload() {
+        dispatch("download", metadata);
+        if (isBitswap) {
+            console.log("🔍 DEBUG: Initiating Bitswap download for file:", metadata.fileName);
+            await dhtService.downloadFile(metadata);
+            showToast(
+                `The file "${metadata.fileName}" has been added to your download folder via Bitswap.`,
+            );
+        }
+        else {
+            console.log("🔍 DEBUG: Initiating WebRTC download for file:", metadata.fileName);
+        }
+    }
+
+    async function confirmPayment() {
+        showPaymentConfirmDialog = false;
+
+        if (!metadata.uploaderAddress) {
+            showToast('Cannot process payment: uploader address not found', 'error');
+            return;
+        }
+
+        try {
+            showToast('Processing payment...', 'info');
+            const txHash = await invoke('process_download_payment', {
+                uploaderAddress: metadata.uploaderAddress,
+                price: metadata.price
+            });
+            showToast(`Payment successful! Transaction: ${txHash.substring(0, 10)}...`, 'success');
+
+            // Refresh balance after payment to reflect the deduction
+            await checkBalance();
+
+            // Proceed with download after successful payment
+            await proceedWithDownload();
+        } catch (error: any) {
+            showToast(`Payment failed: ${error}`, 'error');
+        }
+    }
+
+    function cancelPayment() {
+        showPaymentConfirmDialog = false;
     }
 
     async function confirmDecryptAndQueue() {
@@ -130,9 +162,13 @@
             checkingBalance = true;
             try {
                 canAfford = await invoke('can_afford_download', { price: metadata.price });
+                // Also get the actual balance to display in modal
+                const balanceStr = await invoke('get_user_balance');
+                userBalance = parseFloat(balanceStr) || 0;
             } catch (error) {
                 console.error('Failed to check balance:', error);
                 canAfford = false;
+                userBalance = 0;
             } finally {
                 checkingBalance = false;
             }
@@ -141,6 +177,8 @@
 
     // Check balance when component mounts
     onMount(() => {
+        console.log("💰 SearchResultCard metadata:", metadata);
+        console.log("💰 Price from metadata:", metadata.price);
         checkBalance();
     });
 </script>
@@ -297,17 +335,159 @@
         </div>
     </div>
 
+    {#if showDownloadConfirmDialog}
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div class="bg-background rounded-lg shadow-lg p-6 w-full max-w-md border border-border">
+                <h2 class="text-xl font-bold mb-4 text-center">
+                    {isSeeding ? 'Download Local Copy' : 'Confirm Download'}
+                </h2>
+
+                <div class="space-y-4 mb-6">
+                    <div class="p-4 bg-muted/50 rounded-lg border border-border">
+                        <div class="space-y-2">
+                            <div>
+                                <p class="text-xs text-muted-foreground mb-1">File Name</p>
+                                <p class="text-sm font-semibold break-all">{metadata.fileName}</p>
+                            </div>
+                            <div class="flex justify-between items-center pt-2 border-t border-border/50">
+                                <span class="text-xs text-muted-foreground">Size</span>
+                                <span class="text-sm font-medium">{formatFileSize(metadata.fileSize)}</span>
+                            </div>
+                            {#if isSeeding}
+                                <div class="flex justify-between items-center pt-2 border-t border-border/50">
+                                    <span class="text-xs text-muted-foreground">Status</span>
+                                    <span class="text-sm font-medium text-emerald-600">Already Seeding</span>
+                                </div>
+                                {#if metadata.isEncrypted}
+                                    <div class="flex justify-between items-center pt-2 border-t border-border/50">
+                                        <span class="text-xs text-muted-foreground">Encryption</span>
+                                        <span class="text-sm font-medium text-amber-600">Encrypted</span>
+                                    </div>
+                                {/if}
+                            {/if}
+                        </div>
+                    </div>
+
+                    {#if metadata.price && metadata.price > 0}
+                        <div class="p-4 bg-blue-500/10 rounded-lg border-2 border-blue-500/30">
+                            <div class="text-center">
+                                <p class="text-sm text-muted-foreground mb-1">Price</p>
+                                <p class="text-2xl font-bold text-blue-600">{metadata.price} Chiral</p>
+                            </div>
+                        </div>
+                        {#if isSeeding}
+                            <div class="p-3 bg-amber-500/10 rounded-lg border border-amber-500/30">
+                                <p class="text-xs text-amber-600 text-center">
+                                    You're already seeding this file. Downloading will create a decrypted local copy.
+                                </p>
+                            </div>
+                        {/if}
+                    {:else}
+                        <div class="p-4 bg-emerald-500/10 rounded-lg border-2 border-emerald-500/30">
+                            <div class="text-center">
+                                <p class="text-sm text-muted-foreground mb-1">Price</p>
+                                <p class="text-2xl font-bold text-emerald-600">Free</p>
+                            </div>
+                        </div>
+                        {#if isSeeding}
+                            <div class="p-3 bg-amber-500/10 rounded-lg border border-amber-500/30">
+                                <p class="text-xs text-amber-600 text-center">
+                                    You're already seeding this file. Downloading will create a decrypted local copy.
+                                </p>
+                            </div>
+                        {/if}
+                    {/if}
+                </div>
+
+                <p class="text-sm text-muted-foreground text-center mb-6">
+                    {#if metadata.price && metadata.price > 0}
+                        {isSeeding
+                            ? `Do you want to download a local copy for ${metadata.price} Chiral?`
+                            : `You will be charged ${metadata.price} Chiral. Continue?`}
+                    {:else}
+                        {isSeeding
+                            ? 'Do you want to download a local decrypted copy?'
+                            : 'Are you sure you want to download this file?'}
+                    {/if}
+                </p>
+
+                <div class="flex gap-3">
+                    <Button variant="outline" on:click={cancelDownload} class="flex-1">
+                        Cancel
+                    </Button>
+                    <Button on:click={confirmDownload} class="flex-1 bg-blue-600 hover:bg-blue-700">
+                        Confirm
+                    </Button>
+                </div>
+            </div>
+        </div>
+    {/if}
+
     {#if showDecryptDialog}
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
             <div class="bg-background rounded-lg shadow-lg p-6 w-full max-w-md border border-border">
                 <h2 class="text-lg font-semibold mb-2">Already Seeding</h2>
                 <p class="mb-4 text-sm text-muted-foreground">
-                    You’re already seeding this file{metadata.isEncrypted ? ' (encrypted)' : ''}.<br />
+                    You're already seeding this file{metadata.isEncrypted ? ' (encrypted)' : ''}.<br />
                     Would you like to decrypt and save a local readable copy?
                 </p>
                 <div class="flex justify-end gap-2 mt-4">
                     <Button variant="outline" on:click={cancelDecryptDialog}>Cancel</Button>
                     <Button on:click={confirmDecryptAndQueue}>Download</Button>
+                </div>
+            </div>
+        </div>
+    {/if}
+
+    {#if showPaymentConfirmDialog}
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div class="bg-background rounded-lg shadow-lg p-6 w-full max-w-md border border-border">
+                <h2 class="text-xl font-bold mb-4 text-center">Confirm Payment</h2>
+
+                <div class="space-y-4 mb-6">
+                    <div class="flex justify-between items-center p-3 bg-muted/50 rounded-lg">
+                        <span class="text-sm text-muted-foreground">Your Balance</span>
+                        <span class="text-lg font-bold">{userBalance.toFixed(2)} Chiral</span>
+                    </div>
+
+                    <div class="flex justify-between items-center p-3 bg-blue-500/10 rounded-lg border border-blue-500/30">
+                        <span class="text-sm text-muted-foreground">File Price</span>
+                        <span class="text-lg font-bold text-blue-600">{metadata.price} Chiral</span>
+                    </div>
+
+                    <div class="flex justify-between items-center p-3 bg-muted/50 rounded-lg border-2 border-border">
+                        <span class="text-sm font-semibold">Balance After Purchase</span>
+                        <span class="text-lg font-bold {canAfford ? 'text-emerald-600' : 'text-red-600'}">
+            {(userBalance - (metadata.price || 0)).toFixed(2)} Chiral
+          </span>
+                    </div>
+                </div>
+
+                {#if !canAfford}
+                    <div class="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                        <p class="text-sm text-red-600 font-semibold text-center">
+                            Insufficient balance! You need {(metadata.price || 0) - userBalance} more Chiral.
+                        </p>
+                    </div>
+                {/if}
+
+                <p class="text-sm text-muted-foreground text-center mb-6">
+                    {canAfford
+                        ? 'Proceed with payment to download this file?'
+                        : 'You do not have enough Chiral to download this file.'}
+                </p>
+
+                <div class="flex gap-3">
+                    <Button variant="outline" on:click={cancelPayment} class="flex-1">
+                        Cancel
+                    </Button>
+                    <Button
+                            on:click={confirmPayment}
+                            disabled={!canAfford}
+                            class="flex-1 {!canAfford ? 'opacity-50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}"
+                    >
+                        {canAfford ? 'Confirm Payment' : 'Insufficient Funds'}
+                    </Button>
                 </div>
             </div>
         </div>

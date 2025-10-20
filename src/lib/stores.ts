@@ -37,10 +37,10 @@ export interface FileItem {
     manifest?: any;
     path?: string;
     cids?: string[];
-    price?: number;
     downloadedChunks?: number[];
     totalChunks?: number;
     downloadStartTime?: number;
+    price?: number; // Price in Chiral for this file
 }
 
 export interface ProxyNode {
@@ -146,12 +146,7 @@ export interface BlacklistEntry {
     reason: string;
     timestamp: Date;
 }
-export interface WalletState {
-    balance: number;
-    address: string | null;
-    isConnected: boolean;
-    transactions: Transaction[];
-}
+
 // Sample dummy data
 const dummyFiles: FileItem[] = [
     {
@@ -434,6 +429,7 @@ export interface AppSettings {
     autoUpdate: boolean;
     enableBandwidthScheduling: boolean;
     bandwidthSchedules: BandwidthScheduleEntry[];
+    pricePerMb: number; // Price per MB in Chiral (e.g., 0.001)
 }
 
 // Export the settings store
@@ -476,4 +472,5 @@ export const settings = writable<AppSettings>({
     autoUpdate: true,
     enableBandwidthScheduling: false,
     bandwidthSchedules: [],
+    pricePerMb: 0.001, // Default price: 0.001 Chiral per MB
 });
