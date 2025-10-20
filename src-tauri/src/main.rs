@@ -1944,6 +1944,7 @@ async fn start_file_transfer_service(
 async fn upload_file_to_network(
     state: State<'_, AppState>,
     file_path: String,
+    price: Option<f64>,
 ) -> Result<(), String> {
     // Get the active account address
     let account = get_active_account(&state).await?;
@@ -1968,7 +1969,7 @@ async fn upload_file_to_network(
         ft.upload_file_with_account(
             file_path.clone(),
             file_name.to_string(),
-            Some(account),
+            Some(account.clone()),
             Some(private_key),
         )
         .await
@@ -2006,6 +2007,8 @@ async fn upload_file_to_network(
                 version: Some(1),
                 cids: None,
                 encrypted_key_bundle: None,
+                price,
+                uploader_address: Some(account.clone()),
                 ..Default::default()
             };
 
@@ -2461,6 +2464,8 @@ async fn upload_file_chunk(
             parent_hash: None,
             is_root: true,
             download_path: None,
+            price: None,
+            uploader_address: None
         };
 
         // Store complete file data locally for seeding

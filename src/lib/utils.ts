@@ -4,61 +4,61 @@ import { cubicOut } from "svelte/easing";
 import type { TransitionConfig } from "svelte/transition";
 
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+    return twMerge(clsx(inputs));
 }
 
 type FlyAndScaleParams = {
-  y?: number;
-  x?: number;
-  start?: number;
-  duration?: number;
+    y?: number;
+    x?: number;
+    start?: number;
+    duration?: number;
 };
 
 export const flyAndScale = (
-  node: Element,
-  params: FlyAndScaleParams = {},
+    node: Element,
+    params: FlyAndScaleParams = {},
 ): TransitionConfig => {
-  const style = getComputedStyle(node);
-  const transform = style.transform === "none" ? "" : style.transform;
+    const style = getComputedStyle(node);
+    const transform = style.transform === "none" ? "" : style.transform;
 
-  const scaleConversion = (
-    valueA: number,
-    scaleA: [number, number],
-    scaleB: [number, number],
-  ) => {
-    const [minA, maxA] = scaleA;
-    const [minB, maxB] = scaleB;
+    const scaleConversion = (
+        valueA: number,
+        scaleA: [number, number],
+        scaleB: [number, number],
+    ) => {
+        const [minA, maxA] = scaleA;
+        const [minB, maxB] = scaleB;
 
-    const percentage = (valueA - minA) / (maxA - minA);
-    const valueB = percentage * (maxB - minB) + minB;
+        const percentage = (valueA - minA) / (maxA - minA);
+        const valueB = percentage * (maxB - minB) + minB;
 
-    return valueB;
-  };
+        return valueB;
+    };
 
-  const styleToString = (
-    style: Record<string, number | string | undefined>,
-  ): string => {
-    return Object.keys(style).reduce((str, key) => {
-      if (style[key] === undefined) return str;
-      return str + key + ":" + style[key] + ";";
-    }, "");
-  };
+    const styleToString = (
+        style: Record<string, number | string | undefined>,
+    ): string => {
+        return Object.keys(style).reduce((str, key) => {
+            if (style[key] === undefined) return str;
+            return str + key + ":" + style[key] + ";";
+        }, "");
+    };
 
-  return {
-    duration: params.duration ?? 200,
-    delay: 0,
-    css: (t) => {
-      const y = scaleConversion(t, [0, 1], [params.y ?? 5, 0]);
-      const x = scaleConversion(t, [0, 1], [params.x ?? 0, 0]);
-      const scale = scaleConversion(t, [0, 1], [params.start ?? 0.95, 1]);
+    return {
+        duration: params.duration ?? 200,
+        delay: 0,
+        css: (t) => {
+            const y = scaleConversion(t, [0, 1], [params.y ?? 5, 0]);
+            const x = scaleConversion(t, [0, 1], [params.x ?? 0, 0]);
+            const scale = scaleConversion(t, [0, 1], [params.start ?? 0.95, 1]);
 
-      return styleToString({
-        transform: `${transform} translate3d(${x}px, ${y}px, 0) scale(${scale})`,
-        opacity: t,
-      });
-    },
-    easing: cubicOut,
-  };
+            return styleToString({
+                transform: `${transform} translate3d(${x}px, ${y}px, 0) scale(${scale})`,
+                opacity: t,
+            });
+        },
+        easing: cubicOut,
+    };
 };
 
 const SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"] as const;
@@ -72,88 +72,72 @@ const MONTH = 30 * DAY;
 const YEAR = 365 * DAY;
 
 export function toHumanReadableSize(bytes: number, fractionDigits = 1): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) {
-    return "0 B";
-  }
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+        return "0 B";
+    }
 
-  let value = bytes;
-  let unitIndex = 0;
+    let value = bytes;
+    let unitIndex = 0;
 
-  while (value >= 1024 && unitIndex < SIZE_UNITS.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
+    while (value >= 1024 && unitIndex < SIZE_UNITS.length - 1) {
+        value /= 1024;
+        unitIndex += 1;
+    }
 
-  const decimals = unitIndex === 0 ? 0 : fractionDigits;
-  return `${value.toFixed(decimals)} ${SIZE_UNITS[unitIndex]}`;
+    const decimals = unitIndex === 0 ? 0 : fractionDigits;
+    return `${value.toFixed(decimals)} ${SIZE_UNITS[unitIndex]}`;
 }
 
 const RELATIVE_FORMATTER = new Intl.RelativeTimeFormat(undefined, {
-  numeric: "auto",
+    numeric: "auto",
 });
 
-export function formatRelativeTime(input: Date | number): string {
-  // normalize input into a milliseconds timestamp
-  let timestampMs: number;
+export function formatRelativeTime(date: Date): string {
+    const timestamp = date instanceof Date ? date.getTime() : Number.NaN;
 
-  if (input instanceof Date) {
-    timestampMs = input.getTime();
-  } else if (typeof input === "number" && Number.isFinite(input)) {
-    // Heuristic: if the number looks like seconds (<= 1e12) treat as seconds and convert
-    // If it already looks like ms (> 1e12) keep as-is.
-    timestampMs = input < 1e12 ? input * 1000 : input;
-  } else {
-    return RELATIVE_FORMATTER.format(0, "second");
-  }
-
-  if (!Number.isFinite(timestampMs)) {
-    return RELATIVE_FORMATTER.format(0, "second");
-  }
-
-  const now = Date.now();
-  let diffMs = timestampMs - now;
-
-  // If diff is absurdly large (e.g. unit confusion), try the alternate scale once
-  const hundredYearsMs = 100 * YEAR;
-  if (Math.abs(diffMs) > hundredYearsMs) {
-    const alt = timestampMs < 1e12 ? timestampMs * 1000 : Math.floor(timestampMs / 1000);
-    if (Number.isFinite(alt) && Math.abs(alt - now) < Math.abs(diffMs)) {
-      diffMs = alt - now;
+    if (!Number.isFinite(timestamp)) {
+        return RELATIVE_FORMATTER.format(0, "second");
     }
-  }
 
-  const absDiff = Math.abs(diffMs);
+    const now = Date.now();
+    const diffMs = timestamp - now;
 
-  if (absDiff < MINUTE) {
-    const value = Math.round(diffMs / SECOND);
-    return RELATIVE_FORMATTER.format(value, "second");
-  }
+    if (!Number.isFinite(diffMs)) {
+        return RELATIVE_FORMATTER.format(0, "second");
+    }
 
-  if (absDiff < HOUR) {
-    const value = Math.round(diffMs / MINUTE);
-    return RELATIVE_FORMATTER.format(value, "minute");
-  }
+    const absDiff = Math.abs(diffMs);
 
-  if (absDiff < DAY) {
-    const value = Math.round(diffMs / HOUR);
-    return RELATIVE_FORMATTER.format(value, "hour");
-  }
+    if (absDiff < MINUTE) {
+        const value = Math.round(diffMs / SECOND);
+        return RELATIVE_FORMATTER.format(value, "second");
+    }
 
-  if (absDiff < WEEK) {
-    const value = Math.round(diffMs / DAY);
-    return RELATIVE_FORMATTER.format(value, "day");
-  }
+    if (absDiff < HOUR) {
+        const value = Math.round(diffMs / MINUTE);
+        return RELATIVE_FORMATTER.format(value, "minute");
+    }
 
-  if (absDiff < MONTH) {
-    const value = Math.round(diffMs / WEEK);
-    return RELATIVE_FORMATTER.format(value, "week");
-  }
+    if (absDiff < DAY) {
+        const value = Math.round(diffMs / HOUR);
+        return RELATIVE_FORMATTER.format(value, "hour");
+    }
 
-  if (absDiff < YEAR) {
-    const value = Math.round(diffMs / MONTH);
-    return RELATIVE_FORMATTER.format(value, "month");
-  }
+    if (absDiff < WEEK) {
+        const value = Math.round(diffMs / DAY);
+        return RELATIVE_FORMATTER.format(value, "day");
+    }
 
-  const value = Math.round(diffMs / YEAR);
-  return RELATIVE_FORMATTER.format(value, "year");
+    if (absDiff < MONTH) {
+        const value = Math.round(diffMs / WEEK);
+        return RELATIVE_FORMATTER.format(value, "week");
+    }
+
+    if (absDiff < YEAR) {
+        const value = Math.round(diffMs / MONTH);
+        return RELATIVE_FORMATTER.format(value, "month");
+    }
+
+    const value = Math.round(diffMs / YEAR);
+    return RELATIVE_FORMATTER.format(value, "year");
 }

@@ -129,6 +129,12 @@ pub struct FileMetadata {
     pub encrypted_key_bundle: Option<crate::encryption::EncryptedAesKeyBundle>,
     pub is_root: bool,
     pub download_path: Option<String>,
+    /// Price in Chiral tokens set by the uploader
+    #[serde(default)]
+    pub price: Option<f64>,
+    /// Ethereum address of the uploader (for payment)
+    #[serde(default)]
+    pub uploader_address: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1561,6 +1567,8 @@ async fn run_dht_node(
                                         cids: json_val.get("cids").and_then(|v| serde_json::from_value::<Option<Vec<Cid>>>(v.clone()).ok()).unwrap_or(None),
                                         encrypted_key_bundle: json_val.get("encryptedKeyBundle").and_then(|v| serde_json::from_value::<Option<crate::encryption::EncryptedAesKeyBundle>>(v.clone()).ok()).unwrap_or(None),
                                         is_root: json_val.get("is_root").and_then(|v| v.as_bool()).unwrap_or(true),
+                                        price: json_val.get("price").and_then(|v| v.as_f64()),
+                                        uploader_address: json_val.get("uploader_address").and_then(|v| v.as_str()).map(|s| s.to_string()),
                                         ..Default::default()
                                     };
                                     let _ = event_tx.send(DhtEvent::FileDiscovered(metadata)).await;
@@ -2686,7 +2694,7 @@ async fn run_dht_node(
                                 }
                             } else {
                                 // This is a data block query - find the corresponding file and handle it
-                                
+
                                 let mut completed_downloads = Vec::new();
 
                                 // Check all active downloads for this query_id
@@ -3016,6 +3024,8 @@ async fn run_dht_node(
                                         cids: json_val.get("cids").and_then(|v| serde_json::from_value::<Option<Vec<Cid>>>(v.clone()).ok()).unwrap_or(None),
                                         encrypted_key_bundle: json_val.get("encryptedKeyBundle").and_then(|v| serde_json::from_value::<Option<crate::encryption::EncryptedAesKeyBundle>>(v.clone()).ok()).unwrap_or(None),
                                         is_root: json_val.get("is_root").and_then(|v| v.as_bool()).unwrap_or(true),
+                                        price: json_val.get("price").and_then(|v| v.as_f64()),
+                                        uploader_address: json_val.get("uploader_address").and_then(|v| v.as_str()).map(|s| s.to_string()),
                                         ..Default::default()
                                     };
                                     let _ = event_tx.send(DhtEvent::FileDiscovered(metadata)).await;
@@ -3537,6 +3547,11 @@ async fn handle_kademlia_event(
                                         .get("is_root")
                                         .and_then(|v| v.as_bool())
                                         .unwrap_or(true),
+                                    price: metadata_json.get("price").and_then(|v| v.as_f64()),
+                                    uploader_address: metadata_json
+                                        .get("uploader_address")
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.to_string()),
                                     ..Default::default()
                                 };
 
@@ -5090,6 +5105,8 @@ impl DhtService {
             cids: None,
             is_root,
             download_path: None,
+            price: None,
+            uploader_address: None,
         })
     }
 
