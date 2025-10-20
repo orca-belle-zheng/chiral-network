@@ -38,6 +38,9 @@ export interface FileItem {
   path?: string;
   cids?: string[];
   price?: number;
+  downloadedChunks?: number[];
+  totalChunks?: number;
+  downloadStartTime?: number;
 }
 
 export interface ProxyNode {
@@ -411,6 +414,7 @@ export interface AppSettings {
   enableAutorelay: boolean; // Circuit Relay v2 with AutoRelay (renamed from enableAutoRelay)
   preferredRelays: string[]; // Preferred relay node multiaddrs
   enableRelayServer: boolean; // Act as a relay server for other peers
+  autoStartDht: boolean; // Automatically start DHT network on app launch
   anonymousMode: boolean;
   shareAnalytics: boolean;
   enableNotifications: boolean;
@@ -449,9 +453,10 @@ export const settings = writable<AppSettings>({
   enableAutonat: true, // Enable AutoNAT by default
   autonatProbeInterval: 30, // 30 seconds default
   autonatServers: [], // Use bootstrap nodes by default
-  enableAutorelay: false, // Enable AutoRelay by default (disabled until configured)
+  enableAutorelay: true, // Enable AutoRelay by default
   preferredRelays: [], // Use bootstrap nodes as relays by default
-  enableRelayServer: false, // Disabled by default - user must opt-in
+  enableRelayServer: true, // Enabled by default - helps strengthen the network
+  autoStartDht: false, // Disabled by default - user must opt-in
   anonymousMode: false,
   shareAnalytics: true,
   enableNotifications: true,
